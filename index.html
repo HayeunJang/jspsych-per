@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Audio Rating Task</title>
-  <link rel="stylesheet" href="https://unpkg.com/jspsych@8.0.0/css/jspsych.css">
-  <script src="https://unpkg.com/jspsych@8.0.0"></script>
-  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@2.0.0"></script>
-  <script src="https://unpkg.com/@jspsych/plugin-preload@2.0.0"></script>
-  <script src="https://unpkg.com/@jspsych/plugin-audio-slider-response@2.0.0"></script>
+  <link rel="stylesheet" href="https://unpkg.com/jspsych@8.0.2/css/jspsych.css">
+  <script src="https://unpkg.com/jspsych@8.0.2/dist/index.browser.min.js"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@2.0.2/dist/index.browser.min.js"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-preload@2.0.2/dist/index.browser.min.js"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-audio-slider-response@2.0.2/dist/index.browser.min.js"></script>
 </head>
 <body>
   <div id="jspsych-target"></div>
@@ -36,8 +36,8 @@
 
     /* ===== STIMULI ===== */
     const STIMULI = [
-      { file: 'audio/amazed.wav' },
-      { file: 'audio/sarcastic.wav' }
+      { file: 'assets/audio/amazed.wav' },
+      { file: 'assets/audio/sarcastic.wav' }
     ];
 
     /* ===== SLIDER SETTINGS ===== */
@@ -101,15 +101,42 @@
       labels: SLIDER.labels,
       require_movement: SLIDER.require_movement,
       response_allowed_while_playing: false,
+      trial_ends_after_audio: false,
       data: { 
         task: 'rating', 
         stimulus_file: jsPsych.timelineVariable('file')
       },
+      on_load: function() {
+        // 오디오 재생 종료 시점 기록
+        const audio = document.querySelector('audio');
+        if (audio) {
+          audio.addEventListener('ended', () => {
+            this.audioEndTime = performance.now();
+          });
+        }
+      },
       on_finish: (data) => {
+        // RT를 오디오 종료 시점부터 재계산
+        if (rating_trial.audioEndTime) {
+          const responseTime = performance.now();
+          data.rt_after_audio = Math.round(responseTime - rating_trial.audioEndTime);
+        } else {
+          data.rt_after_audio = null;
+        }
+        
         data.rating = data.response;
         data.stimulus = data.stimulus_file || data.stimulus;
         data.user_agent = navigator.userAgent;
         data.timestamp = new Date().toISOString();
+        data.rt_original = data.rt; // 원본 RT 보존
+        data.rt = data.rt_after_audio; // 새 RT로 교체
+        
+        console.log('Trial finished:', {
+          stimulus: data.stimulus,
+          rt_original: data.rt_original,
+          rt_after_audio: data.rt_after_audio,
+          rating: data.rating
+        });
       }
     };
 
@@ -157,4 +184,3 @@
   </script>
 </body>
 </html>
-
