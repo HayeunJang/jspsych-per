@@ -10,6 +10,17 @@
   <script src="https://unpkg.com/@jspsych/plugin-preload@2.0.0"></script>
   <script src="https://unpkg.com/@jspsych/plugin-audio-slider-response@2.0.0"></script>
   <script src="https://unpkg.com/@jspsych/plugin-survey-html-form@2.0.0"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+    }
+    #jspsych-target {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+  </style>
 </head>
 <body>
   <div id="jspsych-target"></div>
@@ -18,6 +29,8 @@
     /******************************************************
      * Audio Rating Task (slider) + Google Sheets upload
      ******************************************************/
+
+    console.log('Script starting...');
 
     /* ===== CONFIG ===== */
     const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbx_V4Ay6Nzl1sw94IMxKUL_a0E-t9w-pNsvRpi3WV_GMWx9lLCuUhP1Q2ZtQTJ2yINz1A/exec';
@@ -38,7 +51,8 @@
     /* ===== STIMULI ===== */
     const STIMULI = [
       { file: 'audio/amazed.wav' },
-      { file: 'audio/sarcastic.wav' }
+      { file: 'audio/sarcastic.wav' },
+      { file: 'audio/angry.wav' },
     ];
 
     /* ===== SLIDER SETTINGS ===== */
@@ -48,30 +62,44 @@
     };
 
     /* ===== INIT ===== */
-    const jsPsych = initJsPsych({
-      display_element: 'jspsych-target',
-      on_finish: async () => {
-        const ok = await uploadAllRowsToGoogle();
-        if (!ok) {
-          const csv = jsPsych.data.get().csv();
-          const blob = new Blob([csv], { type: 'text/csv' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; 
-          a.download = 'data_fallback.csv';
-          a.textContent = 'Download CSV (upload failed)';
-          a.style.display = 'block';
-          a.style.margin = '20px auto';
-          a.style.textAlign = 'center';
-          document.body.appendChild(a);
+    let jsPsych;
+    try {
+      jsPsych = initJsPsych({
+        display_element: 'jspsych-target',
+        on_finish: async () => {
+          console.log('Experiment finished');
+          const ok = await uploadAllRowsToGoogle();
+          if (!ok) {
+            const csv = jsPsych.data.get().csv();
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; 
+            a.download = 'data_fallback.csv';
+            a.textContent = 'Download CSV (upload failed)';
+            a.style.display = 'block';
+            a.style.margin = '20px auto';
+            a.style.textAlign = 'center';
+            document.body.appendChild(a);
+          }
         }
-      }
-    });
+      });
+      console.log('jsPsych initialized:', jsPsych);
+    } catch (error) {
+      console.error('Error initializing jsPsych:', error);
+      document.body.innerHTML = '<div style="padding: 20px; color: red;">Error initializing jsPsych: ' + error.message + '</div>';
+    }
 
     /* ===== PRELOAD ===== */
     const preload = {
       type: jsPsychPreload,
-      audio: STIMULI.map(s => s.file)
+      audio: STIMULI.map(s => s.file),
+      on_error: (file) => {
+        console.warn('Failed to load:', file);
+      },
+      on_success: () => {
+        console.log('All files preloaded successfully');
+      }
     };
 
     /* ===== SCREENS ===== */
@@ -123,8 +151,6 @@
     };
 
     /* ===== RATING TRIAL ===== */
-    let audioEndTime = null; // 전역 변수로 오디오 종료 시점 저장
-
     const rating_trial = {
       type: jsPsychAudioSliderResponse,
       stimulus: jsPsych.timelineVariable('file'),
@@ -145,40 +171,31 @@
         stimulus_file: jsPsych.timelineVariable('file')
       },
       on_load: function() {
-        // 오디오 재생 종료 시점 기록
-        audioEndTime = null; // 초기화
+        // 오디오가 끝나는 시점의 timestamp 기록
         const audio = document.querySelector('audio');
         if (audio) {
           audio.addEventListener('ended', () => {
-            audioEndTime = performance.now();
-            console.log('Audio ended at:', audioEndTime);
+            const trialData = jsPsych.data.get().last(1).values()[0];
+            trialData.audio_end_time = new Date().toISOString();
+            console.log('Audio ended at:', trialData.audio_end_time);
           });
         }
+        // 트라이얼 시작 시점
+        const trialData = jsPsych.data.get().last(1).values()[0];
+        trialData.trial_start_time = new Date().toISOString();
       },
       on_finish: (data) => {
-        // RT를 오디오 종료 시점부터 재계산
-        data.rt_original = data.rt; // 원본 RT 보존
-        
-        if (audioEndTime !== null) {
-          const responseTime = performance.now();
-          data.rt_after_audio = Math.round(responseTime - audioEndTime);
-          data.rt = data.rt_after_audio; // 새 RT로 교체
-        } else {
-          // 오디오 종료 감지 실패시 원본 RT 유지
-          data.rt_after_audio = null;
-          console.warn('Audio end time not detected, using original RT');
-        }
-        
         data.rating = data.response;
         data.stimulus = data.stimulus_file || data.stimulus;
         data.user_agent = navigator.userAgent;
-        data.timestamp = new Date().toISOString();
+        data.response_time = new Date().toISOString(); // 응답한 시점
         
         console.log('Trial finished:', {
           stimulus: data.stimulus,
-          rt_original: data.rt_original,
-          rt_after_audio: data.rt_after_audio,
-          rating: data.rating
+          rating: data.rating,
+          trial_start: data.trial_start_time,
+          audio_end: data.audio_end_time,
+          response: data.response_time
         });
       }
     };
@@ -191,7 +208,12 @@
     };
 
     /* ===== RUN ===== */
-    jsPsych.run([preload, welcome, rating_block, demographics, end]);
+    if (jsPsych) {
+      console.log('Starting experiment...');
+      jsPsych.run([preload, welcome, rating_block, demographics, end]);
+    } else {
+      console.error('jsPsych not initialized');
+    }
 
     /* ===== GOOGLE UPLOAD ===== */
     async function uploadAllRowsToGoogle() {
@@ -202,29 +224,32 @@
       try {
         const allData = jsPsych.data.get().values();
         
-        // demographics 정보 추출
         const demoData = allData.find(d => d.task === 'demographics');
         const demographics = demoData?.response || {};
         
-        // rating task만 필터링하고 demographics 정보 추가
         const rows = allData
           .filter(d => d.task === 'rating')
-          .map(d => ({
-            trial_index:  d.trial_index,
-            task:         d.task,
-            stimulus:     d.stimulus || d.stimulus_file || '',
-            rating:       d.rating ?? d.response,
-            rt:           d.rt,
-            time_elapsed: d.time_elapsed,
-            timestamp:    d.timestamp || new Date().toISOString(),
-            user_agent:   d.user_agent || navigator.userAgent,
-            gender:       demographics.gender || '',
-            birth_year:   demographics.birth_year || '',
-            birth_month:  demographics.birth_month || '',
-            native_lang:  demographics.native_lang || '',
-            dialect:      demographics.dialect || '',
-            foreign_lang: demographics.foreign_lang || ''
-          }));
+          .map(d => {
+            // rt 필드를 명시적으로 제외
+            const { rt, rt_original, rt_after_audio, ...cleanData } = d;
+            return {
+              trial_index:      cleanData.trial_index,
+              task:             cleanData.task,
+              stimulus:         cleanData.stimulus || cleanData.stimulus_file || '',
+              rating:           cleanData.rating ?? cleanData.response,
+              time_elapsed:     cleanData.time_elapsed,
+              trial_start_time: cleanData.trial_start_time || '',
+              audio_end_time:   cleanData.audio_end_time || '',
+              response_time:    cleanData.response_time || '',
+              user_agent:       cleanData.user_agent || navigator.userAgent,
+              gender:           demographics.gender || '',
+              birth_year:       demographics.birth_year || '',
+              birth_month:      demographics.birth_month || '',
+              native_lang:      demographics.native_lang || '',
+              dialect:          demographics.dialect || '',
+              foreign_lang:     demographics.foreign_lang || ''
+            };
+          });
 
         await fetch(GAS_ENDPOINT, {
           method: 'POST',
@@ -242,4 +267,3 @@
   </script>
 </body>
 </html>
-
