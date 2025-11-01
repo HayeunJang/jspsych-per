@@ -33,7 +33,7 @@
     console.log('Script starting...');
 
     /* ===== CONFIG ===== */
-    const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxZY31vBJFJbXXYE7gt67M2mIyZeWYAGAF4OYf2aqeZGcyyPq-eMXZhgbZn3712pG6pgg/exec';
+    const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxIdFT4c8QBy9_4vs8u1KfEOIspiXu3hSWYDsi3CpeqUoDgaHF_Zxt7s6rhouY9OJCwUA/exec';
 
     /* ===== UI TEXTS ===== */
     const TEXTS = {
@@ -151,6 +151,8 @@
     };
 
     /* ===== RATING TRIAL ===== */
+    let currentTrialStartTime = null;
+
     const rating_trial = {
       type: jsPsychAudioSliderResponse,
       stimulus: jsPsych.timelineVariable('file'),
@@ -168,26 +170,17 @@
       trial_ends_after_audio: false,
       data: { 
         task: 'rating', 
-        stimulus_file: jsPsych.timelineVariable('file'),
-        trial_start_time: () => new Date().toISOString() // 함수로 실행 시점에 생성
+        stimulus_file: jsPsych.timelineVariable('file')
       },
       on_load: function() {
-        console.log('Trial loaded');
-        
-        // 오디오가 끝나는 시점 기록
-        const audio = document.querySelector('audio');
-        if (audio) {
-          audio.addEventListener('ended', () => {
-            // 현재 진행중인 trial의 data에 직접 저장
-            const currentTrial = jsPsych.getCurrentTrial();
-            currentTrial.data.audio_end_time = new Date().toISOString();
-            console.log('Audio ended at:', currentTrial.data.audio_end_time);
-          }, { once: true }); // 한 번만 실행
-        }
+        // 트라이얼 시작 시점 기록
+        currentTrialStartTime = new Date().toISOString();
+        console.log('Trial loaded, start time:', currentTrialStartTime);
       },
       on_finish: (data) => {
         data.rating = data.response;
         data.stimulus = data.stimulus_file || data.stimulus;
+        data.trial_start_time = currentTrialStartTime;
         data.response_time = new Date().toISOString(); // 응답한 시점
         data.user_agent = navigator.userAgent;
         
@@ -195,7 +188,6 @@
           stimulus: data.stimulus,
           rating: data.rating,
           trial_start: data.trial_start_time,
-          audio_end: data.audio_end_time,
           response: data.response_time
         });
       }
@@ -240,7 +232,6 @@
               rating:           cleanData.rating ?? cleanData.response,
               time_elapsed:     cleanData.time_elapsed,
               trial_start_time: cleanData.trial_start_time || '',
-              audio_end_time:   cleanData.audio_end_time || '',
               response_time:    cleanData.response_time || '',
               user_agent:       cleanData.user_agent || navigator.userAgent,
               gender:           demographics.gender || '',
@@ -268,4 +259,3 @@
   </script>
 </body>
 </html>
-
