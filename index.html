@@ -1,45 +1,46 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Audio Rating Task – MWE</title>
-
-  <!-- jsPsych core & plugins -->
-  <link rel="stylesheet" href="https://unpkg.com/jspsych@7/dist/css/jspsych.css">
-  <script src="https://unpkg.com/jspsych@7"></script>
-  <script src="https://unpkg.com/@jspsych/plugin-preload@1.2.0"></script>
-  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@1.2.0"></script>
-  <script src="https://unpkg.com/@jspsych/plugin-audio-slider-response@1.2.0"></script>
-
-  <style>
-    body { max-width: 820px; margin: 40px auto; padding: 0 20px; }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Rating Task</title>
+  <link rel="stylesheet" href="https://unpkg.com/jspsych@8.0.0/css/jspsych.css">
+  <script src="https://unpkg.com/jspsych@8.0.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@2.0.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-preload@2.0.0"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-audio-slider-response@2.0.0"></script>
 </head>
 <body>
-  <!-- jsPsych가 여기에 렌더링합니다 -->
   <div id="jspsych-target"></div>
-
+  
   <script>
+    /******************************************************
+     * Audio Rating Task (slider) + Google Sheets upload
+     ******************************************************/
+
+    /* ===== CONFIG ===== */
+    const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbx_V4Ay6Nzl1sw94IMxKUL_a0E-t9w-pNsvRpi3WV_GMWx9lLCuUhP1Q2ZtQTJ2yINz1A/exec';
+
     /* ===== UI TEXTS ===== */
     const TEXTS = {
       welcomeTitle: 'Audio Rating Task',
       welcomeBody: 'You will hear short sounds and rate them on a scale.',
       startBtn: 'Start',
-      prompt: 'How strongly did this sound match the “sarcastic” category?',
+      prompt: 'How strongly did this sound match the "sarcastic" category?',
       leftLabel: 'Not at all',
       rightLabel: 'Very strongly',
       endTitle: 'Thanks!',
-      endBody: 'Your data have been prepared.',
+      endBody: 'Your data have been prepared. If upload fails, use the CSV button.',
       finishBtn: 'Finish'
     };
 
-    /* ===== STIMULI (파일 경로는 HTML 기준) ===== */
+    /* ===== STIMULI ===== */
     const STIMULI = [
-      { file: 'audio/amazed.wav' },
-      { file: 'audio/sarcastic.wav' }
+      { file: 'assets/audio/amazed.wav' },
+      { file: 'assets/audio/sarcastic.wav' }
     ];
 
-    /* ===== SLIDER ===== */
+    /* ===== SLIDER SETTINGS ===== */
     const SLIDER = {
       min: 1, max: 7, step: 1, start: 4, require_movement: true,
       labels: ['1','2','3','4','5','6','7']
@@ -48,22 +49,31 @@
     /* ===== INIT ===== */
     const jsPsych = initJsPsych({
       display_element: 'jspsych-target',
-      on_finish: () => {
-        // 여기서는 업로드 생략 (UI 확인용 최소본)
-        const csv = jsPsych.data.get().csv();
-        console.log('CSV preview:\n', csv);
+      on_finish: async () => {
+        const ok = await uploadAllRowsToGoogle();
+        if (!ok) {
+          const csv = jsPsych.data.get().csv();
+          const blob = new Blob([csv], { type: 'text/csv' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; 
+          a.download = 'data_fallback.csv';
+          a.textContent = 'Download CSV (upload failed)';
+          a.style.display = 'block';
+          a.style.margin = '20px auto';
+          a.style.textAlign = 'center';
+          document.body.appendChild(a);
+        }
       }
     });
 
-    /* ===== PRELOAD (오류 로깅 켜기) ===== */
+    /* ===== PRELOAD ===== */
     const preload = {
       type: jsPsychPreload,
-      audio: STIMULI.map(s => s.file),
-      continue_after_error: false,
-      on_error: (file) => console.error('Preload failed:', file)
+      audio: STIMULI.map(s => s.file)
     };
 
-    /* ===== WELCOME / END ===== */
+    /* ===== SCREENS ===== */
     const welcome = {
       type: jsPsychHtmlButtonResponse,
       stimulus: `<h2>${TEXTS.welcomeTitle}</h2><p>${TEXTS.welcomeBody}</p>`,
@@ -76,43 +86,74 @@
       choices: [TEXTS.finishBtn]
     };
 
-    /* ===== TRIAL: timelineVariable을 trial 내부에서 직접 사용 ===== */
-    const audioRatingTrial = {
+    /* ===== RATING TRIAL ===== */
+    const rating_trial = {
       type: jsPsychAudioSliderResponse,
       stimulus: jsPsych.timelineVariable('file'),
-      prompt:
-        `<p>${TEXTS.prompt}</p>
-         <div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-top:4px;">
-           <span>${TEXTS.leftLabel}</span><span>${TEXTS.rightLabel}</span>
-         </div>`,
-      slider_min: SLIDER.min,
-      slider_max: SLIDER.max,
+      prompt: `<p>${TEXTS.prompt}</p>
+               <div style="display:flex;justify-content:space-between;font-size:0.9rem;margin-top:4px;">
+                <span>${TEXTS.leftLabel}</span><span>${TEXTS.rightLabel}</span>
+               </div>`,
+      min: SLIDER.min,
+      max: SLIDER.max,
       slider_start: SLIDER.start,
-      slider_step: SLIDER.step,
+      step: SLIDER.step,
       labels: SLIDER.labels,
       require_movement: SLIDER.require_movement,
       response_allowed_while_playing: false,
-      trial_ends_after_audio: false,
-      on_load: () => console.log('Loaded trial for:', jsPsych.timelineVariable('file')()),
-      data: { task: 'rating', stimulus_file: jsPsych.timelineVariable('file') },
-      on_finish: (d) => {
-        d.rating     = d.response;
-        d.stimulus   = d.stimulus_file || d.stimulus;
-        d.user_agent = navigator.userAgent;
-        d.timestamp  = new Date().toISOString();
+      data: { 
+        task: 'rating', 
+        stimulus_file: jsPsych.timelineVariable('file')
+      },
+      on_finish: (data) => {
+        data.rating = data.response;
+        data.stimulus = data.stimulus_file || data.stimulus;
+        data.user_agent = navigator.userAgent;
+        data.timestamp = new Date().toISOString();
       }
     };
 
+    /* ===== RANDOM ORDER BLOCK ===== */
     const rating_block = {
-      timeline: [ audioRatingTrial ],
+      timeline: [rating_trial],
       timeline_variables: STIMULI,
-      sample: { type: 'without-replacement' }
+      randomize_order: true
     };
 
-    /* ===== RUN (로드 완료 후) ===== */
-    window.addEventListener('load', () => {
-      jsPsych.run([preload, welcome, rating_block, end]);
-    });
+    /* ===== RUN ===== */
+    jsPsych.run([preload, welcome, rating_block, end]);
+
+    /* ===== GOOGLE UPLOAD ===== */
+    async function uploadAllRowsToGoogle() {
+      if (!GAS_ENDPOINT || GAS_ENDPOINT.startsWith('PASTE_')) {
+        console.warn('No GAS endpoint configured.');
+        return false;
+      }
+      try {
+        const rows = jsPsych.data.get().values().map(d => ({
+          trial_index:  d.trial_index,
+          task:         d.task || '',
+          stimulus:     d.stimulus || d.stimulus_file || '',
+          rating:       d.rating ?? d.response,
+          rt:           d.rt,
+          time_elapsed: d.time_elapsed,
+          timestamp:    d.timestamp || new Date().toISOString(),
+          user_agent:   d.user_agent || navigator.userAgent
+        }));
+
+        await fetch(GAS_ENDPOINT, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rows)
+        });
+        console.log('Upload attempted. Check your Google Sheet.');
+        return true;
+      } catch (e) {
+        console.warn('Upload error:', e);
+        return false;
+      }
+    }
   </script>
 </body>
 </html>
